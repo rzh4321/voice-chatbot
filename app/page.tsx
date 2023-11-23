@@ -2,6 +2,7 @@
 import 'regenerator-runtime/runtime'; // Necessary for async/await to work in all environments
 import { useEffect, useState } from 'react';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
+import { getResponse } from '@/actions';
 
 const defaultIntroduction = ``;
 
@@ -15,17 +16,20 @@ export default function Home() {
       command: ['*'],
       callback: (command: string) => handleSend(command),
     },
-  ]
+  ];
 
-  const [speakButtonDisabled, setSpeakButtonDisabled] = useState(false);
-  const { transcript, resetTranscript, listening, finalTranscript } = useSpeechRecognition({ commands });
-  const [speechSynthesis, setSpeechSynthesis] = useState<SpeechSynthesis>();
-  const [messages, setMessages] = useState([ // Messages in the chat
+  const defaultMessage = [
     {
       message: defaultIntroduction,
-      sender: 'ChatGPT',
-    },
-  ])
+      sender: 'ChatGPT'
+    }
+  ]
+
+  const [isCalling, setIsCalling] = useState(false);
+  const { transcript, resetTranscript, listening, finalTranscript } = useSpeechRecognition({ commands });
+  const [speechSynthesis, setSpeechSynthesis] = useState<SpeechSynthesis>();
+  const [isChatBotSpeaking, setIsChatBotSpeaking] = useState(false);
+  const [messages, setMessages] = useState(defaultMessage);
 
   // On component mount, initialize speech synthesis API
   useEffect(() => {
@@ -33,9 +37,11 @@ export default function Home() {
   }, [])
 
   // Function for making the chatbot speak
-  const speak = (message: string) => {
+  const chatBotSpeak = (message: string) => {
+    console.log('in speak')
     // If speech synthesis is not supported, return
-    if (!speechSynthesis) {
+    if (isChatbotSpeaking || !speechSynthesis) {
+      console.log('no speech synthesis')
       return
     }
 
@@ -46,14 +52,29 @@ export default function Home() {
           'Your browser does not support speech recognition software! Try Chrome desktop.',
         ),
       )
-      return
+      return;
     }
 
-    speechSynthesis.speak(new SpeechSynthesisUtterance(message))
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.onstart = handleChatBotSpeechStart;
+    utterance.onend = handleChatBotSpeechEnd;
+    speechSynthesis.speak(utterance);
+  }
+
+  const handleChatBotSpeechStart = () => {
+    // disable mic if chat bot is speaking
+    setIsChatBotSpeaking(true)
+    SpeechRecognition.stopListening()
+  }
+
+  const handleChatBotSpeechEnd = () => {
+    // turn mic back on when chat bot is done speaking
+    setIsChatBotSpeaking(false)
+    SpeechRecognition.startListening()
   }
 
   // System message that defines the behavior of the chatbot
-  const systemMessageToSetChatGptBehaviour = {
+  const systemMessageToSetChatGptBehavior = {
     role: 'system',
     content:
       'Your name is Ricky. An incredibly intelligent and quick-thinking AI, that always replies with enthusiastic and positive energy.',
@@ -62,6 +83,7 @@ export default function Home() {
   // Function to handle message sending
   const handleSend = async (message: string) => {
     if (!message) {
+      console.log('no message');
       return
     }
     // API is expecting objects in format of { role: "user" or "assistant", "content": "message here"}
@@ -75,7 +97,7 @@ export default function Home() {
 
     const updatedMessages = [...messages, formattedMessage];
     setMessages(updatedMessages);
-
+    console.log('updated messages. transcript is ', transcript);
     // Get a response from the chatbot
     await getChatGptAnswer(updatedMessages)
   }
@@ -83,7 +105,10 @@ export default function Home() {
   // Function to get a response from the chatbot
   async function getChatGptAnswer(messagesWithSender: { message: string; sender: string }[]) {
     // Format messages for the OpenAI API
-    const chatGptApiFormattedMessages = messagesWithSender.map((messageObject) => {
+    console.log('in getchatgpt answer')
+    chatBotSpeak('hi');
+    return;
+    const formattedMessages = messagesWithSender.map((messageObject) => {
       return {
         role: messageObject.sender === 'ChatGPT' ? 'assistant' : 'user',
         content: messageObject.message,
@@ -91,25 +116,19 @@ export default function Home() {
     });
 
     // Set up the request body for the OpenAI API
-    const chatGptApiRequestBody = {
+    const formattedMessagesWithSystem = {
       model: 'gpt-3.5-turbo',
       messages: [
-        systemMessageToSetChatGptBehaviour, // The system message defines the chatbot's behavior
-        ...chatGptApiFormattedMessages, // The messages from the chat with the chatbot
+        systemMessageToSetChatGptBehavior, // The system message defines the chatbot's behavior
+        ...formattedMessages, // The messages from the chat with the chatbot
       ],
     }
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + `${API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(chatGptApiRequestBody),
-    })
+    // const res = await getResponse(formattedMessagesWithSystem);
+    // const data = JSON.parse(res);
 
     // Get the chatbot's response and add it to the messages
-    const { choices } = await response.json()
+    const { choices } = data;
     setMessages([
       ...messagesWithSender,
       {
@@ -117,12 +136,12 @@ export default function Home() {
         sender: 'ChatGPT',
       },
     ])
-    speak(choices[0].message.content)
+    chatBotSpeak(choices[0].message.content)
   }
 
   // Function to start speech recognition
-  const ask = () => {
-    setSpeakButtonDisabled(true) // Disable the speak button while recording
+  const userCall = () => {
+    setIsCalling(true);
 
     // If speech recognition is not supported, add an error message
     if (!SpeechRecognition.browserSupportsSpeechRecognition()) {
@@ -132,19 +151,38 @@ export default function Home() {
           message: 'Your browser does not support speech recognition software! Try Chrome desktop, maybe?',
           sender: 'ChatGPT',
         },
-      ])
+      ]);
+      setIsCalling(false);
       return;
     }
 
-    // Start speech recognition
-    SpeechRecognition.startListening()
+    const firstMessage = 'Hows it going?';
+    const formattedMessage = {
+      message: firstMessage,
+      sender: 'assistant'
+    };
 
-    // Reset the transcript if it's not empty
+    const updatedMessages = [...messages, formattedMessage];
+    setMessages(updatedMessages);
+    chatBotSpeak(firstMessage);
+    userSpeak();
+  }
+
+  const userSpeak = () => {
+    SpeechRecognition.startListening();
     if (transcript !== '') {
-      resetTranscript()
+      resetTranscript();
     }
+  };
 
-    setSpeakButtonDisabled(false) // Re-enable the speak button after recording
+  const resetConversation = () => {
+    setMessages(defaultMessage);
+  };
+
+  const endCall = () => {
+    SpeechRecognition.stopListening();
+    resetConversation();
+    setIsCalling(false);
   }
 
   return (
@@ -158,8 +196,7 @@ export default function Home() {
           </div>
           <button
             className='cursor-pointer outline-none w-[80px] h-[50px] md:text-lg text-white bg-[#ff3482] border-none border-r-5 shadow'
-            onClick={ask}
-            disabled={speakButtonDisabled}
+            onClick={userCall}
           >
             microphone icon
           </button>
