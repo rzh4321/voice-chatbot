@@ -7,7 +7,6 @@ import { getResponse } from '@/actions';
 const defaultIntroduction = ``;
 
 export default function Home() {
-  // API key for OpenAI's GPT-3
   const API_KEY = process.env.API_KEY
 
   // Commands for the speech recognition, '*' means any speech will be accepted
